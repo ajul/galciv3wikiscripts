@@ -15,6 +15,8 @@ def processTechTree(techList, filename):
     prereqs = {}
     # specialization : techs
     specializations = {}
+    # techs: unlocks
+    unlocks = {}
 
     # returns the tech itself if not specialization, otherwise returns the corresponding specialization
     def getItem(tech):
@@ -24,9 +26,12 @@ def processTechTree(techList, filename):
         else:
             return techSpecializationList.find("TechSpecialization[InternalName='%s']" % specialization)
 
+    def getTechByGenericName(genericName):
+        return techList.find("Tech[GenericName='%s']" % genericName)
+
     # gets the tech or specialization corresponding to a given name
     def getItemByGenericName(genericName):
-        tech = techList.find("Tech[GenericName='%s']" % genericName)
+        tech = getTechByGenericName(genericName)
         if tech is None: return None
         return getItem(tech)
         
@@ -42,6 +47,7 @@ def processTechTree(techList, filename):
                 specializations[item] = []
             specializations[item].append(tech) 
         prereqs[item] = []
+        unlocks[tech] = []
 
     # compute prereqs
     for tech in techList.findall('Tech'):
@@ -54,14 +60,43 @@ def processTechTree(techList, filename):
             if item not in prereqs[prereqItem]:
                 prereqs[prereqItem].append(item)
 
+    # compute unlocks
+    unlockSources = [
+        ('Improvement', 'Improvement'),
+        ('InvasionStyle', 'Invasion Tactic'),
+        ('PlanetaryProject', 'Planetary Project'),
+        ('ShipComponent', 'Ship Component'), 
+        ('SpecialShipComponent', 'Ship Component'),
+        ('ShipHullStat', 'Hull Size'),
+        ('StarbaseModule', 'Starbase Module'),
+        ('UPResolution', 'United Planets Resolution'),
+        ]
+
+    for unlockType, unlockTypeName in unlockSources:
+        unlockRoot = ET.parse(os.path.join(gamedatadir, '%sDefs.xml' % unlockType))
+        unlockLocSources = ['%sText.xml' % unlockType]
+        for unlockable in unlockRoot.findall('*'):
+            unlockName = loc.english(unlockable.findtext('DisplayName'), unlockLocSources) or '???'
+            unlockText = '%s: %s' % (unlockTypeName, unlockName)
+            for techName in unlockable.findall('Prerequ/Techs/Option'):
+                tech = getTechByGenericName(techName.text)
+                if tech is None:
+                    # print('Tree has no unlock tech %s' % techName.text)
+                    continue
+                unlocks[tech].append(unlockText)
+
+    # TODO: planet traits
     # output
-    
     
     def techInfo(tech):
         info = {}
         info['Name'] = loc.english(tech.findtext('DisplayName'), locSources)
+        age = tech.findtext('Prerequ/TechAge/Option') or ''
+        info['Age'] = age.replace('AgeOf', '')
         info['ResearchCost'] = int(tech.findtext('ResearchCost'))
         statInfo = []
+        for unlock in unlocks[tech]:
+            statInfo.append(unlock)
         for stats in tech.findall('Stats'):
             effectType = loc.english('STATNAME_%s' % stats.findtext('EffectType'), ['StatText.xml'])
             effectType = re.sub('\[.*\]\s*', '', effectType)
@@ -71,7 +106,7 @@ def processTechTree(techList, filename):
             elif stats.findtext('BonusType') == 'Multiplier':
                 value = '%+d%%' % (float(stats.findtext('Value')) * 100.0)
             
-            statInfo.append('%s %s %s' % (value, targetType, effectType))
+            statInfo.append('%s %s %s' % (targetType, effectType, value))
         return info, statInfo
     
     def wikiOutput(item, depth = 0):
@@ -79,13 +114,13 @@ def processTechTree(techList, filename):
         result += '| ' + '>' * depth
         if item.tag == 'Tech':
             info, statInfo = techInfo(item)
-            result += ' %(Name)s || %(ResearchCost)s \n' % info
+            result += ' %(Name)s || %(Age)s || %(ResearchCost)s \n' % info
             result += '| \n'
             for bonus in statInfo:
                 result += '* %s \n' % bonus
         else:
             info, _ = techInfo(specializations[item][0])
-            result += ' %(Name)s || %(ResearchCost)s \n' % info
+            result += ' %(Name)s || %(Age)s || %(ResearchCost)s \n' % info
             result += '| \n'
             for tech in specializations[item]:
                 _, statInfo = techInfo(tech)
@@ -100,11 +135,11 @@ def processTechTree(techList, filename):
 
     result = ''
     for categoryTech in prereqs[rootTech]:
-        for tech in prereqs[categoryTech]:
-            result += '{|class = "wikitable"\n'
-            result += '! Name !! Reserach cost !! Effects \n'
-            result += wikiOutput(tech)
-            result += '|}\n'
+        result += '== %s ==\n' % loc.english(categoryTech.findtext('DisplayName'), locSources)
+        result += '{|class = "wikitable"\n'
+        result += '! Name !! Age !! Research cost !! Effects \n'
+        result += wikiOutput(categoryTech)
+        result += '|}\n'
 
     return result
 
@@ -112,4 +147,7 @@ for filename in os.listdir(gamedatadir):
     techList = ET.parse(os.path.join(gamedatadir, filename)).getroot()
     if techList.tag != 'TechList': continue
     result = processTechTree(techList, filename)
-    #print(result)
+    filebase, _ = os.path.splitext(filename)
+    outfile = open(os.path.join('out', '%s.txt' % filebase), 'w')
+    outfile.write(result)
+    outfile.close()
