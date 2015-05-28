@@ -8,7 +8,7 @@ trees = {}
 def english(key, sources):
     for source in sources:
         if source not in trees:
-            trees[source] = ET.parse(os.path.join(datadir, 'English', 'Text', '%s.xml' % source))
+            trees[source] = ET.parse(os.path.join(datadir, 'English', 'Text', source))
         result = trees[source].findtext("StringTable[Label='%s']/String" % key)
         if result is not None: return result
     print('Missing localization: %s' % key)
